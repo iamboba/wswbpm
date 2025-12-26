@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Metronome V10</title>
+
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#121212">
+    <link rel="apple-touch-icon" href="icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="description" content="A simple, offline-capable metronome PWA">
+    <style>
+        :root { --bg-color: #121212; --panel-bg: #1e1e1e; --text-color: #ffffff; --text-sub: #b0b0b0; --inactive-dot: #333333; --input-bg: #2c2c2c; --gradient-primary: linear-gradient(135deg, #00e5ff 0%, #2979ff 100%); --gradient-active: linear-gradient(135deg, #ff4081 0%, #7c4dff 100%); --accent-cyan: #00e5ff; --accent-yellow: #ffd740; }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body { background-color: var(--bg-color); color: var(--text-color); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; height: 100dvh; display: flex; flex-direction: column; align-items: center; overflow: hidden; user-select: none; }
+        body.flash-beat { background-color: #1a1a1a; }
+        .app-container { width: 100%; max-width: 500px; height: 100%; display: flex; flex-direction: column; padding: 20px; position: relative; }
+        
+        #debug-panel {
+            display: none;
+            position: absolute; top: 0; left: 0; width: 100%; z-index: 10000;
+        }
+        #console-log {
+            width: 100%; height: 150px;
+            background: rgba(0,0,0,0.85); color: #0f0; font-family: monospace; font-size: 10px;
+            padding: 5px; overflow-y: scroll; pointer-events: none;
+            border-bottom: 1px solid #0f0;
+        }
+        #test-btn-overlay {
+            position: absolute; top: 160px; right: 20px;
+            background: red; color: white; border: none; padding: 10px; border-radius: 50%;
+            width: 50px; height: 50px; font-weight: bold;
+            box-shadow: 0 0 10px red; cursor: pointer;
+        }
+
+        #debug-toggle-btn {
+            position: absolute; top: 10px; left: 10px; z-index: 10001;
+            background: rgba(255,255,255,0.1); color: #fff; border: none; 
+            border-radius: 5px; padding: 8px; font-size: 14px; cursor: pointer;
+            opacity: 0.3; transition: opacity 0.2s;
+        }
+        #debug-toggle-btn.active { opacity: 1; background: rgba(255, 64, 129, 0.5); }
+
+        .visualizer-section { flex: 0 0 auto; display: flex; justify-content: center; align-items: center; margin-bottom: 10px; margin-top: 20px;}
+        .visualizer-wrapper { position: relative; width: 260px; height: 260px; }
+        .circle-track { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 220px; height: 220px; border-radius: 50%; background: rgba(255,255,255,0.03); border: 2px solid rgba(255,255,255,0.05); }
+        .center-info { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10; }
+        input.bpm-input { background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; border: none; font-size: 4rem; font-weight: 800; text-align: center; width: 160px; outline: none; margin: 0; padding: 0; filter: drop-shadow(0 0 10px rgba(0, 229, 255, 0.3)); }
+        .bpm-label { font-size: 0.9rem; color: var(--text-sub); letter-spacing: 2px; font-weight: 500;}
+        .tap-btn-center { margin-top: 10px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1); color: var(--text-sub); padding: 8px 24px; border-radius: 30px; font-size: 0.9rem; font-weight: 600; cursor: pointer; }
+        .tap-btn-center:active { background: var(--gradient-active); color: white; border: none; transform: scale(0.95); }
+        .beat-dot { position: absolute; width: 18px; height: 18px; background-color: var(--inactive-dot); border-radius: 50%; margin-left: -9px; margin-top: -9px; transition: background-color 0.05s, transform 0.1s; z-index: 5; }
+        .beat-dot.active { background: var(--gradient-active); box-shadow: 0 0 15px rgba(255, 64, 129, 0.5); transform: scale(1.4); }
+        .beat-dot.accent { width: 24px; height: 24px; margin-left:-12px; margin-top:-12px; }
+        .controls-scroll-area { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 20px; padding-bottom: 20px; }
+        .presets-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+        .preset-btn { background: var(--input-bg); border: none; border-radius: 12px; padding: 12px 5px; color: #fff; font-size: 1rem; font-weight: bold; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .preset-btn.saved { background: var(--gradient-primary); color: #000; }
+        .preset-info { font-size: 0.7rem; color: #888; margin-top: 4px; font-weight: normal; }
+        .control-group { background: var(--panel-bg); padding: 15px; border-radius: 16px; display: flex; flex-direction: column; gap: 15px; }
+        .control-row { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
+        .label-text { font-size: 0.95rem; color: var(--text-sub); font-weight: 500; min-width: 40px;}
+        select.custom-select { flex: 1; background-color: var(--input-bg); color: white; border: 1px solid #444; padding: 12px; border-radius: 12px; font-size: 1rem; outline: none; appearance: none; background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23FFFFFF%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E"); background-repeat: no-repeat; background-position: right 12px top 50%; background-size: 10px auto; }
+        .file-upload-area { display: none; background: #252525; padding: 15px; border-radius: 12px; border: 1px dashed #555; text-align: center; }
+        .file-upload-area.show { display: block; animation: fadeIn 0.3s; }
+        input[type=range] { -webkit-appearance: none; width: 100%; height: 8px; background: #333; border-radius: 6px; outline: none; flex: 1; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 26px; height: 26px; background: var(--gradient-primary); border-radius: 50%; border: 2px solid var(--panel-bg); box-shadow: 0 2px 6px rgba(0,0,0,0.4); }
+        .bottom-actions { flex: 0 0 auto; display: grid; grid-template-columns: auto 1fr; gap: 15px; padding-top: 10px; }
+        .flash-btn { background: #2c2c2c; border: 2px solid #444; color: #888; width: 60px; height: 60px; border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; transition: 0.2s; }
+        .flash-btn.active { border-color: var(--accent-yellow); color: var(--accent-yellow); background: rgba(255, 215, 64, 0.1); box-shadow: 0 0 10px rgba(255, 215, 64, 0.2); }
+        .play-btn { background: var(--gradient-primary); color: #fff; border: none; border-radius: 16px; font-size: 1.2rem; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; box-shadow: 0 4px 15px rgba(0, 229, 255, 0.2); display: flex; align-items: center; justify-content: center; gap: 10px; }
+        .play-btn:active { transform: scale(0.98); filter: brightness(0.9); }
+        .play-btn.playing { background: var(--gradient-active); box-shadow: 0 4px 15px rgba(255, 64, 129, 0.3); }
+    </style>
+</head>
+<body>
+
+<button id="debug-toggle-btn" onclick="toggleDebugPanel()">🔧</button>
+
+<div id="debug-panel">
+    <div id="console-log">Logs will appear here...<br></div>
+    <button id="test-btn-overlay" onclick="testSoundDirect()">🔊</button>
+</div>
+
+<audio id="silent-player" loop playsinline>
+    <source src="data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMD//////////////////////////////////////////////////////////////////wAAAP//OEAAAAAAAAAAAAAAAAAAAAAAAATGF2YzU4LjkxAAAAAAAAAAAAAAAAAAAAAAAAAAAACCAAAAAAAAAAAAAA//OEAA8AAAAA0gAAAAAAABAAAABAAAAAAAAAAAAAAJAAAAAAAAAA//OEAA8AAAAA0gAAAAAAABAAAABAAAAAAAAAAAAAAJAAAAAAAAAA//OEAA8AAAAA0gAAAAAAABAAAABAAAAAAAAAAAAAAJAAAAAAAAAA//OEAA8AAAAA0gAAAAAAABAAAABAAAAAAAAAAAAAAJAAAAAAAAAA" type="audio/mpeg">
+</audio>
+
+<div class="app-container">
+    <div class="visualizer-section">
+        <div class="visualizer-wrapper">
+            <div class="circle-track"></div>
+            <div class="center-info">
+                <span class="bpm-label">BPM</span>
+                <input type="number" id="bpmInput" class="bpm-input" value="120" min="30" max="500">
+                <button class="tap-btn-center" id="tapBtn">TAP TEMPO</button>
+            </div>
+            <div id="dotsContainer"></div>
+        </div>
+    </div>
+
+    <div class="controls-scroll-area">
+        <div class="presets-grid">
+            <button class="preset-btn" data-slot="1">1<span class="preset-info" id="p1-info">90/4</span></button>
+            <button class="preset-btn" data-slot="2">2<span class="preset-info" id="p2-info">120/4</span></button>
+            <button class="preset-btn" data-slot="3">3<span class="preset-info" id="p3-info">140/4</span></button>
+            <button class="preset-btn" data-slot="4">4<span class="preset-info" id="p4-info">80/3</span></button>
+        </div>
+        <div class="control-group">
+            <div class="control-row">
+                <span class="label-text">音色</span>
+                <select id="soundSelect" class="custom-select">
+                    <option value="digital">電子嗶聲 (Digital)</option>
+                    <option value="click">機械快門 (Click)</option>
+                    <option value="wood">木魚敲擊 (Wood)</option>
+                    <option value="soft">柔和提示 (Soft)</option>
+                    <option value="custom">📁 自訂檔案 (MP3)</option>
+                </select>
+            </div>
+            <div id="fileUploadContainer" class="file-upload-area">
+                <div style="font-size:0.85rem; color:#aaa; margin-bottom:10px;">點擊選擇音效檔</div>
+                <input type="file" id="audioFileInput" accept="audio/*" style="width:100%; color:#fff;">
+            </div>
+            <div class="control-row">
+                <span class="label-text">速度</span>
+                <input type="range" id="bpmSlider" min="30" max="300" value="120">
+            </div>
+            <div class="control-row">
+                <span class="label-text">拍數</span>
+                <input type="range" id="beatsSlider" min="1" max="16" value="4">
+                <span style="color:var(--accent-cyan); font-weight:bold; width:20px; text-align:right;" id="beatsVal">4</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="bottom-actions">
+        <button class="flash-btn active" id="flashToggle">💡</button>
+        <button class="play-btn" id="playBtn">▶ 開始</button>
+    </div>
+</div>
+
+<script>
+    // === PWA Service Worker 註冊 (修改處) ===
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('./sw.js')
+                .then(reg => console.log('Service Worker 註冊成功: ', reg.scope))
+                .catch(err => console.log('Service Worker 註冊失敗: ', err));
+        });
+    }
+
+    const logEl = document.getElementById('console-log');
+    const debugPanel = document.getElementById('debug-panel');
+    const debugBtn = document.getElementById('debug-toggle-btn');
+
+    function log(msg) {
+        const time = new Date().toLocaleTimeString();
+        logEl.innerHTML = `[${time}] ${msg}<br>` + logEl.innerHTML;
+        console.log(msg);
+    }
+
+    function toggleDebugPanel() {
+        if (debugPanel.style.display === 'block') {
+            debugPanel.style.display = 'none';
+            debugBtn.classList.remove('active');
+        } else {
+            debugPanel.style.display = 'block';
+            debugBtn.classList.add('active');
+        }
+    }
+
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    let audioCtx = null;
+    let customBuffer = null, isPlaying = false;
+    let currentBeat = 0, nextNoteTime = 0.0, timerID = null, scheduleAheadTime = 0.1;
+    let bpm = 120, beatsPerBar = 4, enableFlash = true;
+    let currentSound = localStorage.getItem('metronomeSound') || 'digital';
+
+    const soundProfiles = {
+        digital: { type: 'sine', high: 1000, low: 800, decay: 0.1 },
+        click:   { type: 'square', high: 600, low: 400, decay: 0.03 },
+        wood:    { type: 'sine', high: 1200, low: 800, decay: 0.05 },
+        soft:    { type: 'triangle', high: 600, low: 440, decay: 0.15 }
+    };
+
+    const bpmInput = document.getElementById('bpmInput'), bpmSlider = document.getElementById('bpmSlider');
+    const beatsSlider = document.getElementById('beatsSlider'), beatsVal = document.getElementById('beatsVal');
+    const playBtn = document.getElementById('playBtn'), tapBtn = document.getElementById('tapBtn');
+    const dotsContainer = document.getElementById('dotsContainer'), flashToggle = document.getElementById('flashToggle');
+    const soundSelect = document.getElementById('soundSelect'), fileArea = document.getElementById('fileUploadContainer');
+    const fileInput = document.getElementById('audioFileInput'), presetBtns = document.querySelectorAll('.preset-btn');
+    const silentPlayer = document.getElementById('silent-player');
+
+    // === 預設值與 localStorage 預設字串 ===
+    const presetDefaults = {
+        1: { bpm: 90,  beats: 4 },
+        2: { bpm: 120, beats: 4 },
+        3: { bpm: 140, beats: 4 },
+        4: { bpm: 80,  beats: 3 }
+    };
+
+    // === 重要：初始化 presets ===
+    let presets = JSON.parse(localStorage.getItem('metronomePresets')) || {};
+
+    window.testSoundDirect = function() {
+        forceUnlock();
+        if(!audioCtx) return alert("Engine not ready");
+        const o = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        o.type = 'square';
+        o.frequency.value = 440;
+        o.connect(g);
+        g.connect(audioCtx.destination);
+        o.start();
+        log("Test Tone");
+        setTimeout(() => o.stop(), 500);
+    };
+
+    function init() {
+        log("App Init V10");
+
+        // 載入預設存檔到 UI
+        updatePresetUI();
+
+        createDots(); 
+        
+        soundSelect.value = currentSound; 
+        checkCustomShow();
+        
+        silentPlayer.volume = 0.01; 
+
+        soundSelect.addEventListener('change', (e) => { 
+            currentSound = e.target.value; 
+            localStorage.setItem('metronomeSound', currentSound); 
+            checkCustomShow(); 
+        });
+
+        fileInput.addEventListener('change', handleFileUpload);
+        
+        bpmSlider.addEventListener('input', (e) => { bpm = parseInt(e.target.value); bpmInput.value = bpm; });
+        bpmInput.addEventListener('change', (e) => { let v=parseInt(e.target.value)||120; if(v<30)v=30;if(v>500)v=500; updateBpm(v); });
+        beatsSlider.addEventListener('input', (e) => { beatsPerBar = parseInt(e.target.value); beatsVal.innerText = beatsPerBar; createDots(); });
+        
+        document.body.addEventListener('touchstart', forceUnlock, {once:true, passive:true});
+        document.body.addEventListener('click', forceUnlock, {once:true});
+
+        playBtn.addEventListener('click', togglePlay);
+        tapBtn.addEventListener('click', () => { log("Tap!"); });
+        flashToggle.addEventListener('click', () => { enableFlash = !enableFlash; enableFlash?flashToggle.classList.add('active'):flashToggle.classList.remove('active'); });
+
+        setupPresetButtons();
+    }
+
+    function forceUnlock() {
+        silentPlayer.play().catch(e => {});
+
+        if (!audioCtx) audioCtx = new AudioContext();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+    }
+
+    function togglePlay() {
+        forceUnlock();
+
+        isPlaying = !isPlaying;
+        if (isPlaying) {
+            if(currentSound==='custom'&&!customBuffer) { 
+                alert("請先上傳音訊檔案"); 
+                isPlaying=false; 
+                return; 
+            }
+            
+            log("Started. BPM: " + bpm);
+            currentBeat = 0; 
+            nextNoteTime = audioCtx.currentTime + 0.05;
+            scheduler(); 
+            playBtn.innerHTML = "❚❚ 暫停"; playBtn.classList.add('playing');
+        } else {
+            cancelAnimationFrame(timerID); 
+            playBtn.innerHTML = "▶ 開始"; playBtn.classList.remove('playing');
+            document.querySelectorAll('.beat-dot').forEach(d => d.classList.remove('active'));
+            silentPlayer.pause();
+            log("Stopped.");
+        }
+    }
+
+    function handleFileUpload(e) {
+        log("Uploading...");
+        forceUnlock();
+        
+        const f = e.target.files[0]; 
+        if(!f) return;
+        
+        fileArea.style.opacity = "0.5";
+
+        const reader = new FileReader();
+        reader.onload = evt => {
+            audioCtx.decodeAudioData(evt.target.result, 
+                buf => { 
+                    customBuffer = buf; 
+                    alert("✅ 音效讀取成功！"); 
+                    log("Decoded Success");
+                    fileArea.style.opacity = "1";
+                    
+                    if(!isPlaying) {
+                         const s = audioCtx.createBufferSource();
+                         s.buffer = buf; s.connect(audioCtx.destination); s.start();
+                    }
+                }, 
+                (err) => { 
+                    alert("❌ 解碼失敗，請確認檔案格式"); 
+                    log("Decode Error: " + err);
+                    fileArea.style.opacity = "1";
+                }
+            );
+        };
+        reader.readAsArrayBuffer(f);
+    }
+
+    function scheduler() {
+        while (nextNoteTime < audioCtx.currentTime + scheduleAheadTime) {
+            scheduleNote(currentBeat, nextNoteTime);
+            nextNote();
+        }
+        timerID = requestAnimationFrame(scheduler);
+    }
+
+    function nextNote() {
+        const secondsPerBeat = 60.0 / bpm;
+        nextNoteTime += secondsPerBeat;
+        currentBeat++;
+        if (currentBeat >= beatsPerBar) currentBeat = 0;
+    }
+
+    function scheduleNote(beat, time) {
+        if(time < audioCtx.currentTime) time = audioCtx.currentTime + 0.01;
+
+        if (currentSound === 'custom' && customBuffer) {
+            const source = audioCtx.createBufferSource();
+            source.buffer = customBuffer;
+            source.connect(audioCtx.destination);
+            source.playbackRate.value = (beat === 0) ? 1.5 : 1.0;
+            source.start(time);
+        } else {
+            let p = soundProfiles[currentSound] || soundProfiles['digital'];
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = p.type;
+            osc.frequency.value = (beat === 0) ? p.high : p.low;
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            gain.gain.setValueAtTime(1, time);
+            gain.gain.exponentialRampToValueAtTime(0.001, time + p.decay);
+            osc.start(time);
+            osc.stop(time + p.decay + 0.1);
+        }
+        setTimeout(() => drawVisuals(beat), Math.max(0, (time - audioCtx.currentTime) * 1000));
+    }
+
+    function createDots() {
+        dotsContainer.innerHTML = '';
+        const w=260, r=110, cx=w/2, cy=w/2;
+        for (let i = 0; i < beatsPerBar; i++) {
+            const dot = document.createElement('div');
+            dot.className = 'beat-dot';
+            if (i === 0) dot.classList.add('accent');
+            const rad = ((360 / beatsPerBar) * i - 90) * (Math.PI / 180);
+            dot.style.left = (cx + r * Math.cos(rad)) + 'px';
+            dot.style.top = (cy + r * Math.sin(rad)) + 'px';
+            dot.id = `dot-${i}`;
+            dotsContainer.appendChild(dot);
+        }
+    }
+    
+    function drawVisuals(b) {
+        document.querySelectorAll('.beat-dot').forEach(d => d.classList.remove('active'));
+        const ad = document.getElementById(`dot-${b}`); if(ad) ad.classList.add('active');
+        if(enableFlash) { document.body.classList.add('flash-beat'); setTimeout(()=>document.body.classList.remove('flash-beat'),80); }
+    }
+    function checkCustomShow() { currentSound === 'custom' ? fileArea.classList.add('show') : fileArea.classList.remove('show'); }
+    function updateBpm(val) { bpm = parseInt(val); bpmSlider.value = bpm; bpmInput.value = bpm; }
+    function updateBeats(val) { beatsPerBar = parseInt(val); beatsSlider.value = beatsPerBar; beatsVal.innerText = beatsPerBar; createDots(); if(!isPlaying)currentBeat=0; }
+    
+    function setupPresetButtons() {
+        presetBtns.forEach(btn => {
+            let pt, s = btn.dataset.slot;
+            const sp = e => { if(e.type==='mousedown'&&e.button!==0)return; pt=setTimeout(()=>savePreset(s, btn),800); };
+            const ep = () => clearTimeout(pt);
+            btn.addEventListener('click', () => { if(!btn.classList.contains('saved')) loadPreset(s); });
+            btn.addEventListener('mousedown', sp); btn.addEventListener('mouseup', ep); btn.addEventListener('mouseleave', ep);
+            btn.addEventListener('touchstart', sp, {passive:true}); btn.addEventListener('touchend', ep);
+            btn.addEventListener('contextmenu', e=>e.preventDefault());
+        });
+    }
+
+    function savePreset(s, b) { 
+        try {
+            presets[s] = { bpm, beats: beatsPerBar }; 
+            localStorage.setItem('metronomePresets', JSON.stringify(presets)); 
+            updatePresetUI(); 
+            b.classList.add('saved'); 
+            setTimeout(()=>b.classList.remove('saved'),500); 
+            if(navigator.vibrate)navigator.vibrate(50);
+            log(`Preset ${s} saved: ${bpm}/${beatsPerBar}`);
+        } catch(e) {
+            log(`Save error: ${e.message}`);
+        }
+    }
+
+    function loadPreset(s) { 
+        const preset = presets[s] || presetDefaults[s];
+        if(preset) { 
+            updateBpm(preset.bpm); 
+            updateBeats(preset.beats); 
+            log(`Preset ${s} loaded: ${preset.bpm}/${preset.beats}`);
+        }
+    }
+
+    function updatePresetUI() { 
+        presetBtns.forEach(b => { 
+            const slot = b.dataset.slot;
+            const preset = presets[slot] || presetDefaults[slot];
+            if(preset) {
+                b.querySelector('.preset-info').innerText = `${preset.bpm}/${preset.beats}`;
+            }
+        }); 
+    }
+
+    init();
+</script>
+</body>
+</html>
